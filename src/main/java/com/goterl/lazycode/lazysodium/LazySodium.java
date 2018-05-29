@@ -920,6 +920,15 @@ public abstract class LazySodium implements
         return boolify(getSodium().crypto_sign_verify_detached(signature, message, messageLen, publicKey));
     }
 
+    @Override
+    public boolean convertPublicKeyEd25519ToCurve25519(byte[] curve, byte[] ed) {
+        return boolify(getSodium().crypto_sign_ed25519_pk_to_curve25519(curve, ed));
+    }
+
+    @Override
+    public boolean convertSecretKeyEd25519ToCurve25519(byte[] curve, byte[] ed) {
+        return boolify(getSodium().crypto_sign_ed25519_sk_to_curve25519(curve, ed));
+    }
 
     // -- lazy
 
@@ -999,6 +1008,24 @@ public abstract class LazySodium implements
         byte[] signatureBytes = toBin(signature);
 
         return cryptoSignVerifyDetached(signatureBytes, messageBytes, messageBytes.length, pkBytes);
+    }
+
+    @Override
+    public KeyPair convertKeyPairEd25519ToCurve25519(KeyPair ed25519KeyPair) throws SodiumException {
+        byte[] edPkBytes = ed25519KeyPair.getPublicKey();
+        byte[] edSkBytes = ed25519KeyPair.getSecretKey();
+
+        byte[] curvePkBytes = new byte[Sign.CURVE25519_PUBLICKEYBYTES];
+        byte[] curveSkBytes = new byte[Sign.CURVE25519_SECRETKEYBYTES];
+
+        boolean pkSuccess = convertPublicKeyEd25519ToCurve25519(curvePkBytes, edPkBytes);
+        boolean skSuccess = convertSecretKeyEd25519ToCurve25519(curveSkBytes, edSkBytes);
+
+        if (!pkSuccess || !skSuccess){
+            throw new SodiumException("Could not convert this key pair.");
+        }
+
+        return new KeyPair(curvePkBytes, curveSkBytes);
     }
 
 
@@ -1284,18 +1311,33 @@ public abstract class LazySodium implements
     }
 
     @Override
-    public boolean cryptoGenericHashInit(GenericHash.State state, byte[] key, int keyLength, int outLen) {
+    public boolean cryptoGenericHash(byte[] out, int outLen, byte[] in, long inLen) {
+        return boolify(getSodium().crypto_generichash(out, outLen, in, inLen, null, 0));
+    }
+
+    @Override
+    public boolean cryptoGenericHashInit(byte[] state, byte[] key, int keyLength, int outLen) {
         return boolify(getSodium().crypto_generichash_init(state, key, keyLength, outLen));
     }
 
     @Override
-    public boolean cryptoGenericHashUpdate(GenericHash.State state, byte[] in, long inLen) {
+    public boolean cryptoGenericHashInit(byte[] state, int outLen) {
+        return boolify(getSodium().crypto_generichash_init(state, null, 0, outLen));
+    }
+
+    @Override
+    public boolean cryptoGenericHashUpdate(byte[] state, byte[] in, long inLen) {
         return boolify(getSodium().crypto_generichash_update(state, in, inLen));
     }
 
     @Override
-    public boolean cryptoGenericHashFinal(GenericHash.State state, byte[] out, int outLen) {
+    public boolean cryptoGenericHashFinal(byte[] state, byte[] out, int outLen) {
         return boolify(getSodium().crypto_generichash_final(state, out, outLen));
+    }
+
+    @Override
+    public int cryptoGenericHashStateBytes() {
+        return getSodium().crypto_generichash_statebytes();
     }
 
     @Override
@@ -1313,21 +1355,14 @@ public abstract class LazySodium implements
     }
 
     @Override
-    public String cryptoGenericHash(String in) throws SodiumException {
-        byte[] message = bytes(in);
-        byte[] hash = randomBytesBuf(GenericHash.BYTES);
-        boolean res = cryptoGenericHash(hash, hash.length, message, message.length, null, 0);
-
-        if (!res) {
-            throw new SodiumException("Error could not hash the message.");
-        }
-
-        return toHex(hash);
+    public String cryptoGenericHashKeygen(int size) throws SodiumException {
+        byte[] key = randomBytesBuf(size);
+        cryptoGenericHashKeygen(key);
+        return toHex(key);
     }
 
     @Override
     public String cryptoGenericHash(String in, String key) throws SodiumException {
-
         byte[] message = bytes(in);
         byte[] keyBytes = toBin(key);
 
@@ -1343,27 +1378,37 @@ public abstract class LazySodium implements
     }
 
     @Override
-    public boolean cryptoGenericHashInit(GenericHash.State state, String key, int outLen) {
-        byte[] keyBytes = toBin(key);
-        return cryptoGenericHashInit(state, keyBytes, keyBytes.length, outLen);
-    }
+    public String cryptoGenericHash(String in) throws SodiumException {
+        byte[] message = bytes(in);
+        byte[] hash = randomBytesBuf(GenericHash.BYTES);
+        boolean res = cryptoGenericHash(hash, hash.length, message, message.length, null, 0);
 
-    @Override
-    public String cryptoGenericHashUpdate(GenericHash.State state, String in) throws SodiumException {
-        byte[] inBytes = bytes(in);
-        boolean res = cryptoGenericHashUpdate(state, inBytes, inBytes.length);
         if (!res) {
-            throw new SodiumException("Could not hash part of the message.");
+            throw new SodiumException("Could not hash the message.");
         }
-        return toHex(inBytes);
+
+        return toHex(hash);
     }
 
     @Override
-    public String cryptoGenericHashFinal(GenericHash.State state, int outLen) throws SodiumException {
-        byte[] hash = randomBytesBuf(outLen);
-        boolean res = cryptoGenericHashFinal(state, hash, hash.length);
+    public boolean cryptoGenericHashInit(byte[] state, String key, int outLen)  {
+        byte[] keyBytes = toBin(key);
+        return getSodium().crypto_generichash_init(state, keyBytes, keyBytes.length, outLen) == 0;
+    }
+
+    @Override
+    public boolean cryptoGenericHashUpdate(byte[] state, String in) {
+        byte[] inBytes = bytes(in);
+        boolean res = getSodium().crypto_generichash_update(state, inBytes, inBytes.length) == 0;
+        return res;
+    }
+
+    @Override
+    public String cryptoGenericHashFinal(byte[] state, int outLen) throws SodiumException {
+        byte[] hash = new byte[outLen];
+        boolean res = getSodium().crypto_generichash_final(state, hash, hash.length) == 0;
         if (!res) {
-            throw new SodiumException("Could not hash the final part of the message.");
+            throw new SodiumException("Could not finalise the hashing process.");
         }
         return toHex(hash);
     }
@@ -1779,8 +1824,6 @@ public abstract class LazySodium implements
             return new DetachedDecrypt(messageBytes, macBytes, charset);
         }
     }
-
-
 
 
     //// -------------------------------------------|

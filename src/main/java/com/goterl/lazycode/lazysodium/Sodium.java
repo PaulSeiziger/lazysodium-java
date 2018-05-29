@@ -347,6 +347,15 @@ public class Sodium {
     public native int crypto_sign_verify_detached(byte[] signature, byte[] message, long messageLen, byte[] publicKey);
 
 
+    public native int crypto_sign_ed25519_pk_to_curve25519(
+            byte[] curve25519PublicKey,
+            byte[] ed25519PublicKey
+    );
+
+    public native int crypto_sign_ed25519_sk_to_curve25519(
+            byte[] curve25519SecretKey,
+            byte[] ed25519SecretKey
+    );
 
     //// -------------------------------------------|
     //// SECRET STREAM
@@ -431,16 +440,18 @@ public class Sodium {
             byte[] key, int keyLen
     );
 
-    public native int crypto_generichash_init(GenericHash.State state,
+    public native int crypto_generichash_init(byte[] state,
                                        byte[] key,
                                        int keyLength,
                                        int outLen);
 
-    public native int crypto_generichash_update(GenericHash.State state,
+    public native int crypto_generichash_update(byte[] state,
                                          byte[] in,
                                          long inLen);
 
-    public native int crypto_generichash_final(GenericHash.State state, byte[] out, int outLen);
+    public native int crypto_generichash_final(byte[] state, byte[] out, int outLen);
+
+    public native int crypto_generichash_statebytes();
 
 
     public native int crypto_generichash_blake2b_salt_personal(
@@ -733,6 +744,5 @@ public class Sodium {
             byte[] nPub,
             AEAD.StateAES state
     );
-
 
 }
